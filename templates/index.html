@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rubik's Solver Elite</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<div class="container">
+    <!-- Hero Section -->
+    <header class="hero-section animate-fade-in">
+        <h1 class="display-3 gradient-text">Rubik's Solver Elite</h1>
+        <p class="text-muted lead mx-auto" style="max-width: 600px;">
+            Advanced computer vision solution to solve any 3x3 cube in seconds.
+        </p>
+    </header>
+
+    <!-- Main Content -->
+    <main class="animate-fade-in" style="animation-delay: 0.2s;">
+        <!-- Quick Action -->
+        <div class="glass-panel p-5 mb-5 text-center">
+            <h3 class="mb-4 outfit">Ready to scan?</h3>
+            <button type="button" class="btn-premium" id="startCameraBtn" data-bs-toggle="modal" data-bs-target="#cameraModal">
+                <i class="fas fa-expand me-2"></i> Start Visual Scan
+            </button>
+            <div class="mt-4 text-muted small">
+                <i class="fas fa-info-circle me-1"></i> Ensure even lighting for best results
+            </div>
+        </div>
+
+        <form id="cubeForm">
+            <h4 class="mb-4 outfit text-uppercase letter-spacing-1">Manual Upload</h4>
+            <div class="upload-grid">
+                <!-- Data-face attribute helps JS identify -->
+                <label class="face-card" for="up" id="area-up" data-face="UP">
+                    <i class="fas fa-layer-group"></i>
+                    <span class="face-label">Up</span>
+                    <img src="" class="preview-overlay d-none" id="preview-up">
+                    <input type="file" id="up" name="up" class="d-none face-input" accept="image/*" required>
+                </label>
+                
+                <label class="face-card" for="left" id="area-left">
+                    <i class="fas fa-columns"></i>
+                    <span class="face-label">Left</span>
+                    <img src="" class="preview-overlay d-none" id="preview-left">
+                    <input type="file" id="left" name="left" class="d-none face-input" accept="image/*" required>
+                </label>
+
+                <label class="face-card" for="front" id="area-front">
+                    <i class="fas fa-square-full"></i>
+                    <span class="face-label">Front</span>
+                    <img src="" class="preview-overlay d-none" id="preview-front">
+                    <input type="file" id="front" name="front" class="d-none face-input" accept="image/*" required>
+                </label>
+
+                <label class="face-card" for="right" id="area-right">
+                    <i class="fas fa-columns fa-flip-horizontal"></i>
+                    <span class="face-label">Right</span>
+                    <img src="" class="preview-overlay d-none" id="preview-right">
+                    <input type="file" id="right" name="right" class="d-none face-input" accept="image/*" required>
+                </label>
+
+                <label class="face-card" for="down" id="area-down">
+                    <i class="fas fa-layer-group fa-flip-vertical"></i>
+                    <span class="face-label">Down</span>
+                    <img src="" class="preview-overlay d-none" id="preview-down">
+                    <input type="file" id="down" name="down" class="d-none face-input" accept="image/*" required>
+                </label>
+
+                <label class="face-card" for="back" id="area-back">
+                    <i class="fas fa-border-all"></i>
+                    <span class="face-label">Back</span>
+                    <img src="" class="preview-overlay d-none" id="preview-back">
+                    <input type="file" id="back" name="back" class="d-none face-input" accept="image/*" required>
+                </label>
+            </div>
+
+            <div class="text-center mt-4">
+                <button type="submit" class="btn-premium shadow-lg" id="analyzeBtn">
+                    <i class="fas fa-microchip me-2"></i> Compute Solution
+                </button>
+            </div>
+        </form>
+
+        <!-- Dynamic Results Section -->
+        <section id="resultsSection" class="mt-5 d-none">
+            <div class="glass-panel p-4 p-md-5 border-success">
+                <h2 class="outfit mb-4"><i class="fas fa-check-circle text-success me-2"></i> Solve Sequence</h2>
+                <div id="solutionMoves" class="move-list">
+                    <!-- JS Injected -->
+                </div>
+
+                <div class="mt-5">
+                    <h4 class="outfit text-muted mb-4">Reconstruction</h4>
+                    <div class="cube-visual-container">
+                        <div id="grid-U" class="face-grid-mini" style="grid-area: U"></div>
+                        <div id="grid-L" class="face-grid-mini" style="grid-area: L"></div>
+                        <div id="grid-F" class="face-grid-mini" style="grid-area: F"></div>
+                        <div id="grid-R" class="face-grid-mini" style="grid-area: R"></div>
+                        <div id="grid-D" class="face-grid-mini" style="grid-area: D"></div>
+                        <div id="grid-B" class="face-grid-mini" style="grid-area: B"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Loading -->
+        <div id="loadingOverlay" class="d-none text-center my-5">
+            <div class="spinner-grow text-primary" role="status"></div>
+            <h4 class="mt-3 outfit">Crunching algorithms...</h4>
+        </div>
+
+        <!-- Error -->
+        <div id="errorAlert" class="alert glass-panel border-danger mt-5 d-none" role="alert">
+            <h5 class="text-danger outfit"><i class="fas fa-ghost me-2"></i> System Error</h5>
+            <p id="errorMessage" class="mb-0 text-muted"></p>
+        </div>
+    </main>
+</div>
+
+<!-- Camera Modal Premium -->
+<div class="modal fade" id="cameraModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content premium-modal">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title outfit gradient-text">Visual Scanner</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" id="closeCameraBtn"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="video-wrapper">
+                    <video id="cameraVideo" autoplay playsinline class="w-100 h-100"></video>
+                    <div class="scan-overlay-target"></div>
+                    <div class="scan-instruction-premium">
+                        <span class="instruction-tag" id="scanInstruction">Scan FRONT Face</span>
+                    </div>
+                </div>
+                
+                <div class="px-4 pb-4">
+                    <div class="d-flex justify-content-center gap-2" id="thumbnailContainer">
+                        <!-- Thumbs -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-0 justify-content-center pb-4">
+                <button type="button" class="btn-premium w-75" id="captureBtn">
+                    Capture <span id="btnFaceName">FRONT</span>
+                </button>
+                <canvas id="captureCanvas" class="d-none"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

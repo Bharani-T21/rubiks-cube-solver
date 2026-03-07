@@ -1,0 +1,7 @@
+flask
+opencv-python-headless
+numpy
+pycuber
+pillow
+werkzeug
+gunicorn
