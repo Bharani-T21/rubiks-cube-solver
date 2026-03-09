@@ -56,21 +56,20 @@ def get_color_and_confidence(hsv_pixel):
         dv = v - cv
         
         if color == 'white':
-            dist = np.sqrt((dh * 0.2)**2 + (ds * 2.5)**2 + (dv * 1.0)**2)
+            dist = np.sqrt((dh * 0.2)**2 + (ds * 2.0)**2 + (dv * 1.0)**2)
         elif color == 'red' or color == 'orange':
-            dist = np.sqrt((dh * 4.0)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
+            # Slightly lower hue weight to be less sensitive but keep separation
+            dist = np.sqrt((dh * 2.5)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
         else:
-            dist = np.sqrt((dh * 3.0)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
+            dist = np.sqrt((dh * 2.0)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
         
         distances[color] = dist
         if dist < min_dist:
             min_dist = dist
             best_color = color
             
-    # Simple confidence: 1.0 if perfectly matched, lower as distance increases.
-    # We use a threshold for "low confidence".
-    # Max reasonable distance for a correct match is around 40-60.
-    confidence = max(0, min(1, 1 - (min_dist / 60)))
+    # Relaxed confidence: 100-120 is a more realistic range for "good enough" matching
+    confidence = max(0, min(1, 1 - (min_dist / 100)))
     
     return best_color, confidence
 

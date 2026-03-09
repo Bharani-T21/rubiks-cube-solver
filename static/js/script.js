@@ -201,7 +201,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const cell = cells[index];
             if (cell) {
                 cell.className = `preview-cell col-${item.color}`;
-                if (item.confidence < 0.6) {
+                if (item.confidence < 0.4) {
                     lowConfidence = true;
                     cell.style.border = '2px solid var(--accent)';
                 } else {
