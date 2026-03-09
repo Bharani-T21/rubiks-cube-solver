@@ -105,7 +105,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- Premium Scanner Logic ---
     const startCameraBtn = document.getElementById('startCameraBtn');
-    const calibrateBtn = document.getElementById('calibrateBtn');
     const cameraModal = document.getElementById('cameraModal');
     const cameraVideo = document.getElementById('cameraVideo');
     const captureBtn = document.getElementById('captureBtn');
@@ -126,7 +125,6 @@ document.addEventListener("DOMContentLoaded", () => {
     ];
     
     let currentScanIndex = 0;
-    let isCalibrating = false; 
     const capturedImages = {};
 
     const openCamera = async () => {
@@ -144,19 +142,8 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     startCameraBtn.addEventListener('click', () => {
-        isCalibrating = false;
         currentScanIndex = 0;
         thumbnailContainer.innerHTML = '';
-        scanInstruction.classList.remove('calibrating');
-        updateScanUI();
-        openCamera();
-    });
-
-    calibrateBtn.addEventListener('click', () => {
-        isCalibrating = true;
-        currentScanIndex = 0;
-        thumbnailContainer.innerHTML = '';
-        scanInstruction.classList.add('calibrating');
         updateScanUI();
         openCamera();
     });
@@ -191,8 +178,10 @@ document.addEventListener("DOMContentLoaded", () => {
         // Update manual upload grid
         const preview = document.getElementById(`preview-${face.name}`);
         const card = document.getElementById(`area-${face.name}`);
-        if (preview) preview.src = dataUrl;
-        if (preview) preview.classList.remove('d-none');
+        if (preview) {
+            preview.src = dataUrl;
+            preview.classList.remove('d-none');
+        }
         if (card) card.classList.add('has-image');
 
         addThumbnail(dataUrl);
@@ -209,6 +198,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function addThumbnail(src) {
         const thumb = document.createElement('img');
         thumb.src = src;
+        thumb.className = 'thumb-item'; // Re-using style if exists
         thumb.style.width = '40px';
         thumb.style.height = '40px';
         thumb.style.objectFit = 'cover';
@@ -228,16 +218,11 @@ document.addEventListener("DOMContentLoaded", () => {
         form.style.opacity = '0.3';
         loading.classList.remove('d-none');
         
-        const payload = {};
-        for (const [key, val] of Object.entries(capturedImages)) {
-            payload[key] = val;
-        }
-        
         try {
             const resp = await fetch('/solve', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(capturedImages)
             });
             const data = await resp.json();
             if (data.success) {
