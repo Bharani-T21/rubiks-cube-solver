@@ -1,5 +1,7 @@
 import os
 import base64
+import numpy as np
+import cv2
 from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 from image_processing import process_face_image, build_cube_string
@@ -85,6 +87,27 @@ def solve():
         return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route('/preview_colors', methods=['POST'])
+def preview_colors():
+    data = request.get_json()
+    if not data or 'image' not in data:
+        return jsonify({"success": False, "error": "No image provided"}), 400
+    
+    img_b64 = data['image']
+    if ',' in img_b64:
+        img_b64 = img_b64.split(',')[1]
+        
+    try:
+        img_bytes = base64.b64decode(img_b64)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        from image_processing import process_frame
+        result = process_frame(img)
+        return jsonify({"success": True, "preview_data": result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

@@ -38,37 +38,72 @@ def preprocess_image(img):
     
     return final
 
-def get_color_name(hsv_pixel):
+def get_color_and_confidence(hsv_pixel):
     """
-    Matches an HSV pixel to the closest static color center using weighted cylindrical distance.
+    Matches an HSV pixel to the closest static color center and returns
+    the color name and a confidence score (0-1).
     """
     h, s, v = hsv_pixel
     min_dist = float('inf')
     best_color = 'white'
     
+    # Calculate all distances first to find min and max for confidence
+    distances = {}
     for color, center in DEFAULT_COLOR_CENTERS.items():
         ch, cs, cv = center
-        
-        # Circular Hue distance (0-180)
         dh = min(abs(h - ch), 180 - abs(h - ch))
         ds = s - cs
         dv = v - cv
         
-        # Weighted Distance
         if color == 'white':
-            # For white, low saturation is key
             dist = np.sqrt((dh * 0.2)**2 + (ds * 2.5)**2 + (dv * 1.0)**2)
         elif color == 'red' or color == 'orange':
-            # Red/Orange need high Hue sensitivity to stay separate
             dist = np.sqrt((dh * 4.0)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
         else:
             dist = np.sqrt((dh * 3.0)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
-            
+        
+        distances[color] = dist
         if dist < min_dist:
             min_dist = dist
             best_color = color
             
-    return best_color
+    # Simple confidence: 1.0 if perfectly matched, lower as distance increases.
+    # We use a threshold for "low confidence".
+    # Max reasonable distance for a correct match is around 40-60.
+    confidence = max(0, min(1, 1 - (min_dist / 60)))
+    
+    return best_color, confidence
+
+def process_frame(img):
+    """
+    Processes a raw frame (numpy array) and returns 9 detected colors with confidence.
+    Used for real-time preview.
+    """
+    if img is None:
+        return []
+
+    img = cv2.resize(img, (300, 300))
+    proc_img = preprocess_image(img)
+    hsv = cv2.cvtColor(proc_img, cv2.COLOR_BGR2HSV)
+    
+    preview_data = []
+    
+    for i in range(3):
+        for j in range(3):
+            y1, y2 = i*100 + 20, (i+1)*100 - 20
+            x1, x2 = j*100 + 20, (j+1)*100 - 20
+            roi = hsv[y1:y2, x1:x2]
+            
+            mask = roi[:, :, 2] <= 245
+            if np.any(mask):
+                avg_hsv = cv2.mean(roi, mask=mask.astype(np.uint8))[:3]
+            else:
+                avg_hsv = cv2.mean(roi)[:3]
+                
+            color, conf = get_color_and_confidence(avg_hsv)
+            preview_data.append({"color": color, "confidence": conf})
+            
+    return preview_data
 
 def process_face_image(image_path):
     """
@@ -83,24 +118,22 @@ def process_face_image(image_path):
     proc_img = preprocess_image(img)
     hsv = cv2.cvtColor(proc_img, cv2.COLOR_BGR2HSV)
     
-    cell_h, cell_w = 100, 100
     face_colors = []
     
     for i in range(3):
         for j in range(3):
-            # 60% ROI for stability
             y1, y2 = i*100 + 20, (i+1)*100 - 20
             x1, x2 = j*100 + 20, (j+1)*100 - 20
             roi = hsv[y1:y2, x1:x2]
             
-            # Mask out reflections (V > 245)
             mask = roi[:, :, 2] <= 245
             if np.any(mask):
                 avg_hsv = cv2.mean(roi, mask=mask.astype(np.uint8))[:3]
             else:
                 avg_hsv = cv2.mean(roi)[:3]
                 
-            face_colors.append(get_color_name(avg_hsv))
+            color, _ = get_color_and_confidence(avg_hsv)
+            face_colors.append(color)
             
     return face_colors
 

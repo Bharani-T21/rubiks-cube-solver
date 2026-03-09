@@ -113,8 +113,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnFaceName = document.getElementById('btnFaceName');
     const scanInstruction = document.getElementById('scanInstruction');
     const thumbnailContainer = document.getElementById('thumbnailContainer');
+    const livePreviewGrid = document.getElementById('livePreviewGrid');
+    const confidenceIndicator = document.getElementById('confidenceIndicator');
 
     let stream = null;
+    let previewInterval = null;
     const scanSequence = [
         { name: 'front', color: 'RED' },
         { name: 'right', color: 'BLUE' },
@@ -135,9 +138,82 @@ document.addEventListener("DOMContentLoaded", () => {
                 });
                 cameraVideo.srcObject = stream;
             }
+            startRealTimePreview();
         } catch (err) {
             alert("Camera access denied.");
             bootstrap.Modal.getInstance(cameraModal).hide();
+        }
+    };
+
+    const startRealTimePreview = () => {
+        if (previewInterval) clearInterval(previewInterval);
+        previewInterval = setInterval(updateLivePreview, 500);
+    };
+
+    const stopRealTimePreview = () => {
+        if (previewInterval) {
+            clearInterval(previewInterval);
+            previewInterval = null;
+        }
+    };
+
+    const updateLivePreview = async () => {
+        if (!cameraVideo.videoWidth) return;
+
+        const overlay = document.querySelector('.scan-overlay-target');
+        const vRect = cameraVideo.getBoundingClientRect();
+        const oRect = overlay.getBoundingClientRect();
+
+        // Use a hidden canvas for light-weight preview capture
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = 300;
+        tempCanvas.height = 300;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        const sX = (oRect.left - vRect.left) * (cameraVideo.videoWidth / vRect.width);
+        const sY = (oRect.top - vRect.top) * (cameraVideo.videoHeight / vRect.height);
+        const sW = oRect.width * (cameraVideo.videoWidth / vRect.width);
+        const sH = oRect.height * (cameraVideo.videoHeight / vRect.height);
+
+        tempCtx.drawImage(cameraVideo, sX, sY, sW, sH, 0, 0, 300, 300);
+        const frameData = tempCanvas.toDataURL('image/jpeg', 0.5);
+
+        try {
+            const response = await fetch('/preview_colors', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: frameData })
+            });
+            const data = await response.json();
+            if (data.success) {
+                updatePreviewUI(data.preview_data);
+            }
+        } catch (err) {
+            console.error("Preview error:", err);
+        }
+    };
+
+    const updatePreviewUI = (previewData) => {
+        const cells = livePreviewGrid.querySelectorAll('.preview-cell');
+        let lowConfidence = false;
+
+        previewData.forEach((item, index) => {
+            const cell = cells[index];
+            if (cell) {
+                cell.className = `preview-cell col-${item.color}`;
+                if (item.confidence < 0.6) {
+                    lowConfidence = true;
+                    cell.style.border = '2px solid var(--accent)';
+                } else {
+                    cell.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+                }
+            }
+        });
+
+        if (lowConfidence) {
+            confidenceIndicator.classList.remove('d-none');
+        } else {
+            confidenceIndicator.classList.add('d-none');
         }
     };
 
@@ -149,6 +225,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     const stopCamera = () => {
+        stopRealTimePreview();
         if (stream) {
             stream.getTracks().forEach(track => track.stop());
             stream = null;
@@ -195,10 +272,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    function addThumbnail(src) {
+    function addThumbnail(dataUrl) {
         const thumb = document.createElement('img');
-        thumb.src = src;
-        thumb.className = 'thumb-item'; // Re-using style if exists
+        thumb.src = dataUrl;
         thumb.style.width = '40px';
         thumb.style.height = '40px';
         thumb.style.objectFit = 'cover';
