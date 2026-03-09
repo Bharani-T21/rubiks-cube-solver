@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-from sklearn.cluster import KMeans
 
 def preprocess_image(img):
     """
@@ -52,82 +51,64 @@ def extract_facelet_hsv(image_path):
     
     for i in range(3):
         for j in range(3):
-            # Extract central part of the cell (50% of area for reliability)
-            y1 = i * cell_h + int(cell_h * 0.25)
-            y2 = (i + 1) * cell_h - int(cell_h * 0.25)
-            x1 = j * cell_w + int(cell_w * 0.25)
-            x2 = (j + 1) * cell_w - int(cell_w * 0.25)
+            # Extract central part of the cell (60% of area for reliability)
+            y1 = i * cell_h + int(cell_h * 0.2)
+            y2 = (i + 1) * cell_h - int(cell_h * 0.2)
+            x1 = j * cell_w + int(cell_w * 0.2)
+            x2 = (j + 1) * cell_w - int(cell_w * 0.2)
             
             roi = hsv[y1:y2, x1:x2]
             
             # Reflection Reduction: Create mask for non-reflective pixels (V <= 240)
             v_channel = roi[:, :, 2]
-            mask = v_channel <= 240
+            mask = v_channel <= 245 # Slightly more relaxed
             
             if np.any(mask):
-                # Calculate mean only on non-reflective pixels
                 avg_hsv = cv2.mean(roi, mask=mask.astype(np.uint8))[:3]
             else:
-                # Fallback to simple mean if everything is reflective (unlikely)
                 avg_hsv = cv2.mean(roi)[:3]
                 
             face_hsv_values.append(avg_hsv)
             
     return face_hsv_values
 
-def classify_colors_clustering(all_54_hsv):
+def classify_colors_anchored(all_54_hsv, anchor_indices):
     """
-    Perform K-Means clustering (k=6) on 54 facelets and map clusters to colors.
+    Classifies 54 facelets by comparing them to 6 ground-truth anchors (centers).
     """
-    # Convert to numpy array for KMeans
-    data = np.array(all_54_hsv)
+    # 1. Extract the 6 anchors based on center indices
+    # anchor_indices maps color_name -> index in all_54_hsv
+    anchors = {color: all_54_hsv[idx] for color, idx in anchor_indices.items()}
     
-    # Initialize KMeans
-    kmeans = KMeans(n_clusters=6, n_init=10, random_state=42)
-    labels = kmeans.fit_predict(data)
-    centroids = kmeans.cluster_centers_
+    detected_colors = []
     
-    # Mapping strategy: Identify clusters based on Hue, Saturation, and Value
-    # color_map[cluster_index] = color_name
-    color_map = {}
-    
-    # 1. Identify White: Lowest Saturation
-    white_idx = np.argmin(centroids[:, 1])
-    color_map[white_idx] = 'white'
-    
-    # Remaining indices
-    remaining_indices = [i for i in range(6) if i != white_idx]
-    
-    # 2. Map other colors based on Hue
-    # Standard HSV Hues: Red (0, 180), Orange (15), Yellow (30), Green (60), Blue (110-120)
-    for idx in remaining_indices:
-        hue = centroids[idx, 0]
-        # Handle Red wrap-around (Red can be around 0-10 or 160-180)
-        eff_hue = hue if hue <= 150 else 0 
+    for hsv in all_54_hsv:
+        h, s, v = hsv
+        min_dist = float('inf')
+        best_color = 'white'
         
-        if eff_hue < 8:
-            color_map[idx] = 'red'
-        elif eff_hue < 20:
-            color_map[idx] = 'orange'
-        elif eff_hue < 40:
-            color_map[idx] = 'yellow'
-        elif eff_hue < 85:
-            color_map[idx] = 'green'
-        else:
-            color_map[idx] = 'blue'
-
-    # Ensure all 6 colors are unique. If they aren't, K-Means might have failed
-    # due to lighting or missing colors. We'll use the labels as-is but log a warning.
-    detected_colors = [color_map.get(label, 'unknown') for label in labels]
-    
-    # If duplicates exist, fall back to simple heuristic for the centroids
-    if len(set(color_map.values())) < 6:
-        # Sort remaining by hue
-        sorted_by_hue = sorted(remaining_indices, key=lambda i: centroids[i,0])
-        # This is a very rough backup: Orange < Yellow < Green < Blue < Red (wrap)
-        # But let's trust the current mapping first.
-        pass
-
+        for color, anchor in anchors.items():
+            ah, asat, av = anchor
+            
+            # Cylindrical distance in HSV
+            # Hue is circular (0-180)
+            dh = min(abs(h - ah), 180 - abs(h - ah))
+            ds = s - asat
+            dv = v - av
+            
+            # Calculate weighted Euclidean distance
+            # For White, Hue is less stable, so we weight S/V more
+            if color == 'white':
+                dist = np.sqrt((dh * 0.5)**2 + (ds * 2.0)**2 + (dv * 1.0)**2)
+            else:
+                dist = np.sqrt((dh * 2.5)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
+                
+            if dist < min_dist:
+                min_dist = dist
+                best_color = color
+                
+        detected_colors.append(best_color)
+        
     return detected_colors
 
 def build_cube_string(faces_colors):

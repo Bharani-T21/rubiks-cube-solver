@@ -116,13 +116,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const thumbnailContainer = document.getElementById('thumbnailContainer');
 
     let stream = null;
-    const scanSequence = ['front', 'right', 'back', 'left', 'up', 'down'];
-    const calSequence = ['white', 'yellow', 'red', 'orange', 'blue', 'green'];
+    const scanSequence = [
+        { name: 'front', color: 'RED' },
+        { name: 'right', color: 'BLUE' },
+        { name: 'back', color: 'ORANGE' },
+        { name: 'left', color: 'GREEN' },
+        { name: 'up', color: 'WHITE' },
+        { name: 'down', color: 'YELLOW' }
+    ];
     
     let currentScanIndex = 0;
-    let isCalibrating = false;
+    let isCalibrating = false; 
     const capturedImages = {};
-    const calibrationData = {};
 
     const openCamera = async () => {
         try {
@@ -170,7 +175,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const vRect = cameraVideo.getBoundingClientRect();
         const oRect = overlay.getBoundingClientRect();
 
-        // Calculate source coordinates in the video stream
         const sX = (oRect.left - vRect.left) * (cameraVideo.videoWidth / vRect.width);
         const sY = (oRect.top - vRect.top) * (cameraVideo.videoHeight / vRect.height);
         const sW = oRect.width * (cameraVideo.videoWidth / vRect.width);
@@ -180,80 +184,27 @@ document.addEventListener("DOMContentLoaded", () => {
         captureCanvas.height = sH;
         ctx.drawImage(cameraVideo, sX, sY, sW, sH, 0, 0, sW, sH);
 
-        if (isCalibrating) {
-            const colorName = calSequence[currentScanIndex];
-            // Sample center 20% for calibration
-            const sampleSize = Math.floor(sW * 0.2);
-            const sampleX = Math.floor((sW - sampleSize) / 2);
-            const sampleY = Math.floor((sH - sampleSize) / 2);
-            
-            const imgData = ctx.getImageData(sampleX, sampleY, sampleSize, sampleSize);
-            const rgb = getAverageRGB(imgData.data);
-            calibrationData[colorName] = rgbToHsv(rgb.r, rgb.g, rgb.b);
-            
-            addThumbnail(captureCanvas.toDataURL('image/jpeg', 0.5));
-            
-            currentScanIndex++;
-            if (currentScanIndex < calSequence.length) {
-                updateScanUI();
-            } else {
-                bootstrap.Modal.getInstance(cameraModal).hide();
-                alert("Calibration complete!");
-            }
+        const face = scanSequence[currentScanIndex];
+        const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.9);
+        capturedImages[face.name] = dataUrl;
+        
+        // Update manual upload grid
+        const preview = document.getElementById(`preview-${face.name}`);
+        const card = document.getElementById(`area-${face.name}`);
+        if (preview) preview.src = dataUrl;
+        if (preview) preview.classList.remove('d-none');
+        if (card) card.classList.add('has-image');
+
+        addThumbnail(dataUrl);
+
+        currentScanIndex++;
+        if (currentScanIndex < scanSequence.length) {
+            updateScanUI();
         } else {
-            const faceName = scanSequence[currentScanIndex];
-            const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.9);
-            capturedImages[faceName] = dataUrl;
-            
-            // Update manual upload grid
-            const preview = document.getElementById(`preview-${faceName}`);
-            const card = document.getElementById(`area-${faceName}`);
-            preview.src = dataUrl;
-            preview.classList.remove('d-none');
-            card.classList.add('has-image');
-
-            addThumbnail(dataUrl);
-
-            currentScanIndex++;
-            if (currentScanIndex < scanSequence.length) {
-                updateScanUI();
-            } else {
-                bootstrap.Modal.getInstance(cameraModal).hide();
-                submitScannedImages();
-            }
+            bootstrap.Modal.getInstance(cameraModal).hide();
+            submitScannedImages();
         }
     });
-
-    function getAverageRGB(data) {
-        let r = 0, g = 0, b = 0;
-        for (let i = 0; i < data.length; i += 4) {
-            r += data[i];
-            g += data[i+1];
-            b += data[i+2];
-        }
-        const count = data.length / 4;
-        return { r: r/count, g: g/count, b: b/count };
-    }
-
-    function rgbToHsv(r, g, b) {
-        r /= 255, g /= 255, b /= 255;
-        const max = Math.max(r, g, b), min = Math.min(r, g, b);
-        let h, s, v = max;
-        const d = max - min;
-        s = max === 0 ? 0 : d / max;
-        if (max === min) {
-            h = 0;
-        } else {
-            switch (max) {
-                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-                case g: h = (b - r) / d + 2; break;
-                case b: h = (r - g) / d + 4; break;
-            }
-            h /= 6;
-        }
-        // OpenCV scale: H is 0-180, S/V are 0-255
-        return [h * 180, s * 255, v * 255];
-    }
 
     function addThumbnail(src) {
         const thumb = document.createElement('img');
@@ -267,10 +218,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function updateScanUI() {
-        const sequence = isCalibrating ? calSequence : scanSequence;
-        const name = sequence[currentScanIndex].toUpperCase();
-        btnFaceName.textContent = name;
-        scanInstruction.textContent = isCalibrating ? `Center ${name} piece` : `Scan ${name} Face`;
+        const face = scanSequence[currentScanIndex];
+        btnFaceName.textContent = face.name.toUpperCase();
+        scanInstruction.innerHTML = `Scan ${face.name.toUpperCase()} Face <br><small>(Center should be ${face.color})</small>`;
     }
 
     async function submitScannedImages() {
@@ -278,9 +228,9 @@ document.addEventListener("DOMContentLoaded", () => {
         form.style.opacity = '0.3';
         loading.classList.remove('d-none');
         
-        const payload = { ...capturedImages };
-        if (Object.keys(calibrationData).length > 0) {
-            payload.calibration = calibrationData;
+        const payload = {};
+        for (const [key, val] of Object.entries(capturedImages)) {
+            payload[key] = val;
         }
         
         try {

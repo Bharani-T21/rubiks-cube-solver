@@ -79,16 +79,31 @@ def solve():
                 return jsonify({"success": False, "error": f"Invalid file type for {face_key}."}), 400
                 
     try:
-        # Aggregated 54 HSV values for K-Means
-        face_order = ['up', 'right', 'front', 'down', 'left', 'back']
+        # SYNCED SCAN ORDER (Must match script.js exactly)
+        face_order = ['front', 'right', 'back', 'left', 'up', 'down']
         all_hsv_flat = []
         for face in face_order:
+            if face not in raw_hsv_data:
+                 return jsonify({"success": False, "error": f"Missing data for {face}"}), 400
             all_hsv_flat.extend(raw_hsv_data[face])
             
-        # Clustering across all facelets
-        clustered_colors_flat = classify_colors_clustering(all_hsv_flat)
+        # Define anchors based on the middle sticker of each scanned face
+        # In a list of 54 (9 stickers x 6 faces), the centers are at indices 4, 13, 22, 31, 40, 49
+        # faces are in order: front, right, back, left, up, down
+        # Standard colors for these centers (FRONT is usually Red if scanning standard):
+        anchor_indices = {
+            'red': 4,      # Front center
+            'blue': 13,    # Right center
+            'orange': 22,  # Back center
+            'green': 31,   # Left center
+            'white': 40,   # Up center
+            'yellow': 49   # Down center
+        }
         
-        # Split results back into faces
+        # Perform anchored classification
+        clustered_colors_flat = classify_colors_anchored(all_hsv_flat, anchor_indices)
+        
+        # Map back to faces
         faces_colors = {}
         for i, face in enumerate(face_order):
             faces_colors[face] = clustered_colors_flat[i*9 : (i+1)*9]
