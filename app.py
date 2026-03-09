@@ -2,7 +2,7 @@ import os
 import base64
 from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
-from image_processing import process_face_image, build_cube_string
+from image_processing import extract_facelet_hsv, classify_colors_clustering, build_cube_string
 from solver import solve_cube
 
 app = Flask(__name__)
@@ -30,12 +30,11 @@ def index():
 
 @app.route('/solve', methods=['POST'])
 def solve():
-    faces_colors = {}
-    calibration_data = None
+    raw_hsv_data = {}
+    
     if request.is_json:
         data = request.get_json()
-        calibration_data = data.get('calibration')
-        for face_key, face_notation in FACE_MAPPING.items():
+        for face_key in FACE_MAPPING.keys():
             if face_key not in data:
                 return jsonify({"success": False, "error": f"Missing {face_key} image."}), 400
                 
@@ -49,8 +48,8 @@ def solve():
                 with open(filepath, "wb") as f:
                     f.write(img_bytes)
                     
-                colors = process_face_image(filepath, calibration_data)
-                faces_colors[face_notation] = colors
+                hsv_values = extract_facelet_hsv(filepath)
+                raw_hsv_data[face_key] = hsv_values
             except Exception as e:
                 return jsonify({"success": False, "error": f"Error processing {face_key} face: {str(e)}"}), 500
                 
@@ -58,13 +57,7 @@ def solve():
         if not request.files:
             return jsonify({"success": False, "error": "No images uploaded."}), 400
             
-        # Optional calibration from form-data if needed (though usually JSON from scanner)
-        cal_str = request.form.get('calibration')
-        import json
-        calibration_data = json.loads(cal_str) if cal_str else None
-
-        # Process each uploaded image
-        for face_key, face_notation in FACE_MAPPING.items():
+        for face_key in FACE_MAPPING.keys():
             if face_key not in request.files:
                 return jsonify({"success": False, "error": f"Missing {face_key} image."}), 400
             
@@ -78,17 +71,30 @@ def solve():
                 file.save(filepath)
                 
                 try:
-                    colors = process_face_image(filepath, calibration_data)
-                    faces_colors[face_notation] = colors
+                    hsv_values = extract_facelet_hsv(filepath)
+                    raw_hsv_data[face_key] = hsv_values
                 except Exception as e:
                     return jsonify({"success": False, "error": f"Error processing {face_key} face: {str(e)}"}), 500
             else:
                 return jsonify({"success": False, "error": f"Invalid file type for {face_key}."}), 400
                 
     try:
+        # Aggregated 54 HSV values for K-Means
+        face_order = ['up', 'right', 'front', 'down', 'left', 'back']
+        all_hsv_flat = []
+        for face in face_order:
+            all_hsv_flat.extend(raw_hsv_data[face])
+            
+        # Clustering across all facelets
+        clustered_colors_flat = classify_colors_clustering(all_hsv_flat)
+        
+        # Split results back into faces
+        faces_colors = {}
+        for i, face in enumerate(face_order):
+            faces_colors[face] = clustered_colors_flat[i*9 : (i+1)*9]
+            
         cube_string = build_cube_string(faces_colors)
         result = solve_cube(cube_string)
-        # Also return the detected colors so frontend can display them
         result['faces_colors'] = faces_colors
         return jsonify(result)
     except Exception as e:
@@ -96,8 +102,6 @@ def solve():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    # Use SSL only locally (when PORT is not set by cloud provider)
-    # This allows camera access on local network while staying compatible with Render
     if 'PORT' in os.environ:
         app.run(host='0.0.0.0', port=port)
     else:

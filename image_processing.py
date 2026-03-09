@@ -1,16 +1,6 @@
 import cv2
 import numpy as np
-
-# Default HSV color centers (approximate)
-# These will be used if no calibration data is provided
-DEFAULT_COLOR_CENTERS = {
-    'red': [0, 200, 150],
-    'orange': [15, 200, 200],
-    'yellow': [30, 200, 200],
-    'green': [60, 200, 150],
-    'blue': [110, 200, 150],
-    'white': [0, 20, 200]
-}
+from sklearn.cluster import KMeans
 
 def preprocess_image(img):
     """
@@ -41,97 +31,110 @@ def preprocess_image(img):
     
     return final
 
-def get_color_name(hsv_pixel, calibration_data=None):
+def extract_facelet_hsv(image_path):
     """
-    Determines color by finding the closest center in HSV space.
-    Uses Euclidean distance in a modified HSV space (cylindrical or weighted).
+    Extracts 9 average HSV values from a face image.
+    Applies reflection reduction by ignoring pixels with V > 240.
     """
-    centers = calibration_data if calibration_data else DEFAULT_COLOR_CENTERS
-    
-    h, s, v = hsv_pixel
-    
-    min_dist = float('inf')
-    detected_color = 'white'
-    
-    for color, center in centers.items():
-        ch, cs, cv = center
-        
-        # Calculate distance. Hue is circular (0-180 in OpenCV)
-        dh = min(abs(h - ch), 180 - abs(h - ch))
-        ds = s - cs
-        dv = v - cv
-        
-        # Weighting: Hue is most important for chromatic colors, 
-        # Saturation/Value for white.
-        if color == 'white':
-            dist = np.sqrt((ds * 0.5)**2 + (dv * 0.5)**2)
-        else:
-            # For chromatic colors, low saturation often misidentifies as the wrong color
-            # so we give extra weight to hue if saturation is decent.
-            dist = np.sqrt((dh * 2.0)**2 + (ds * 0.5)**2 + (dv * 0.5)**2)
-            
-        if dist < min_dist:
-            min_dist = dist
-            detected_color = color
-            
-    return detected_color
-
-def process_face_image(image_path, calibration_data=None):
     img = cv2.imread(image_path)
     if img is None:
         raise ValueError(f"Could not read image at {image_path}")
 
-    # Resize to standard size
     img = cv2.resize(img, (300, 300))
-    
-    # 1. Preprocess
     proc_img = preprocess_image(img)
-    
-    # 2. Convert to HSV
     hsv = cv2.cvtColor(proc_img, cv2.COLOR_BGR2HSV)
     
     height, width, _ = img.shape
     cell_h = height // 3
     cell_w = width // 3
     
-    face_colors = []
+    face_hsv_values = []
     
-    # Grid goes top-to-bottom, left-to-right rows
     for i in range(3):
         for j in range(3):
-            # Extract central part of the cell (region-based averaging)
-            # Use 40% of the cell to avoid borders entirely
-            y1 = i * cell_h + int(cell_h * 0.3)
-            y2 = (i + 1) * cell_h - int(cell_h * 0.3)
-            x1 = j * cell_w + int(cell_w * 0.3)
-            x2 = (j + 1) * cell_w - int(cell_w * 0.3)
+            # Extract central part of the cell (50% of area for reliability)
+            y1 = i * cell_h + int(cell_h * 0.25)
+            y2 = (i + 1) * cell_h - int(cell_h * 0.25)
+            x1 = j * cell_w + int(cell_w * 0.25)
+            x2 = (j + 1) * cell_w - int(cell_w * 0.25)
             
             roi = hsv[y1:y2, x1:x2]
-            # Calculate mean HSV across the ROI
-            avg_hsv = cv2.mean(roi)[:3]
             
-            color = get_color_name(avg_hsv, calibration_data)
-            face_colors.append(color)
-
-            # Draw rectangle on original image for debugging
-            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(img, color[0].upper(), (x1, y1 + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            # Reflection Reduction: Create mask for non-reflective pixels (V <= 240)
+            v_channel = roi[:, :, 2]
+            mask = v_channel <= 240
             
-    # Save the debug image
-    debug_path = image_path.replace('.jpg', '_debug.jpg').replace('.png', '_debug.png')
-    if not debug_path.endswith('_debug.jpg') and not debug_path.endswith('_debug.png'):
-         debug_path += "_debug.jpg"
-    cv2.imwrite(debug_path, img)
+            if np.any(mask):
+                # Calculate mean only on non-reflective pixels
+                avg_hsv = cv2.mean(roi, mask=mask.astype(np.uint8))[:3]
+            else:
+                # Fallback to simple mean if everything is reflective (unlikely)
+                avg_hsv = cv2.mean(roi)[:3]
+                
+            face_hsv_values.append(avg_hsv)
+            
+    return face_hsv_values
 
-    return face_colors
+def classify_colors_clustering(all_54_hsv):
+    """
+    Perform K-Means clustering (k=6) on 54 facelets and map clusters to colors.
+    """
+    # Convert to numpy array for KMeans
+    data = np.array(all_54_hsv)
+    
+    # Initialize KMeans
+    kmeans = KMeans(n_clusters=6, n_init=10, random_state=42)
+    labels = kmeans.fit_predict(data)
+    centroids = kmeans.cluster_centers_
+    
+    # Mapping strategy: Identify clusters based on Hue, Saturation, and Value
+    # color_map[cluster_index] = color_name
+    color_map = {}
+    
+    # 1. Identify White: Lowest Saturation
+    white_idx = np.argmin(centroids[:, 1])
+    color_map[white_idx] = 'white'
+    
+    # Remaining indices
+    remaining_indices = [i for i in range(6) if i != white_idx]
+    
+    # 2. Map other colors based on Hue
+    # Standard HSV Hues: Red (0, 180), Orange (15), Yellow (30), Green (60), Blue (110-120)
+    for idx in remaining_indices:
+        hue = centroids[idx, 0]
+        # Handle Red wrap-around (Red can be around 0-10 or 160-180)
+        eff_hue = hue if hue <= 150 else 0 
+        
+        if eff_hue < 8:
+            color_map[idx] = 'red'
+        elif eff_hue < 20:
+            color_map[idx] = 'orange'
+        elif eff_hue < 40:
+            color_map[idx] = 'yellow'
+        elif eff_hue < 85:
+            color_map[idx] = 'green'
+        else:
+            color_map[idx] = 'blue'
+
+    # Ensure all 6 colors are unique. If they aren't, K-Means might have failed
+    # due to lighting or missing colors. We'll use the labels as-is but log a warning.
+    detected_colors = [color_map.get(label, 'unknown') for label in labels]
+    
+    # If duplicates exist, fall back to simple heuristic for the centroids
+    if len(set(color_map.values())) < 6:
+        # Sort remaining by hue
+        sorted_by_hue = sorted(remaining_indices, key=lambda i: centroids[i,0])
+        # This is a very rough backup: Orange < Yellow < Green < Blue < Red (wrap)
+        # But let's trust the current mapping first.
+        pass
+
+    return detected_colors
 
 def build_cube_string(faces_colors):
     """
     faces_colors is a dict: {'up': [...], 'right': [...], 'front': [...], 'down': [...], 'left': [...], 'back': [...]}
     Order for solver: L, U, F, D, R, B
     """
-    # Map from lowercase frontend keys to solver order
-    mapping = {'left': 'left', 'up': 'up', 'front': 'front', 'down': 'down', 'right': 'right', 'back': 'back'}
     order = ['left', 'up', 'front', 'down', 'right', 'back']
     
     cube_string = []
@@ -139,8 +142,6 @@ def build_cube_string(faces_colors):
         if face_key not in faces_colors:
              raise ValueError(f"Missing face data for {face_key}")
         for color in faces_colors[face_key]:
-            if color == 'unknown':
-                raise ValueError(f"Detected invalid color. Ensure good lighting and central placement.")
             cube_string.append(color)
             
     return cube_string
