@@ -11,12 +11,12 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Map UI names to solver order names
 FACE_MAPPING = {
-    'up': 'U',
-    'right': 'R',
-    'front': 'F',
-    'down': 'D',
-    'left': 'L',
-    'back': 'B'
+    'up': 'up',
+    'right': 'right',
+    'front': 'front',
+    'down': 'down',
+    'left': 'left',
+    'back': 'back'
 }
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
@@ -31,9 +31,10 @@ def index():
 @app.route('/solve', methods=['POST'])
 def solve():
     faces_colors = {}
-    
+    calibration_data = None
     if request.is_json:
         data = request.get_json()
+        calibration_data = data.get('calibration')
         for face_key, face_notation in FACE_MAPPING.items():
             if face_key not in data:
                 return jsonify({"success": False, "error": f"Missing {face_key} image."}), 400
@@ -48,7 +49,7 @@ def solve():
                 with open(filepath, "wb") as f:
                     f.write(img_bytes)
                     
-                colors = process_face_image(filepath)
+                colors = process_face_image(filepath, calibration_data)
                 faces_colors[face_notation] = colors
             except Exception as e:
                 return jsonify({"success": False, "error": f"Error processing {face_key} face: {str(e)}"}), 500
@@ -57,6 +58,11 @@ def solve():
         if not request.files:
             return jsonify({"success": False, "error": "No images uploaded."}), 400
             
+        # Optional calibration from form-data if needed (though usually JSON from scanner)
+        cal_str = request.form.get('calibration')
+        import json
+        calibration_data = json.loads(cal_str) if cal_str else None
+
         # Process each uploaded image
         for face_key, face_notation in FACE_MAPPING.items():
             if face_key not in request.files:
@@ -72,7 +78,7 @@ def solve():
                 file.save(filepath)
                 
                 try:
-                    colors = process_face_image(filepath)
+                    colors = process_face_image(filepath, calibration_data)
                     faces_colors[face_notation] = colors
                 except Exception as e:
                     return jsonify({"success": False, "error": f"Error processing {face_key} face: {str(e)}"}), 500

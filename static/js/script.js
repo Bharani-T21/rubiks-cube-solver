@@ -105,6 +105,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- Premium Scanner Logic ---
     const startCameraBtn = document.getElementById('startCameraBtn');
+    const calibrateBtn = document.getElementById('calibrateBtn');
     const cameraModal = document.getElementById('cameraModal');
     const cameraVideo = document.getElementById('cameraVideo');
     const captureBtn = document.getElementById('captureBtn');
@@ -116,23 +117,43 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let stream = null;
     const scanSequence = ['front', 'right', 'back', 'left', 'up', 'down'];
+    const calSequence = ['white', 'yellow', 'red', 'orange', 'blue', 'green'];
+    
     let currentScanIndex = 0;
+    let isCalibrating = false;
     const capturedImages = {};
+    const calibrationData = {};
 
-    startCameraBtn.addEventListener('click', async () => {
-        currentScanIndex = 0;
-        thumbnailContainer.innerHTML = '';
-        updateScanUI();
-
+    const openCamera = async () => {
         try {
-            stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment', width: { ideal: 1280 } }
-            });
-            cameraVideo.srcObject = stream;
+            if (!stream) {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 1280 } }
+                });
+                cameraVideo.srcObject = stream;
+            }
         } catch (err) {
             alert("Camera access denied.");
             bootstrap.Modal.getInstance(cameraModal).hide();
         }
+    };
+
+    startCameraBtn.addEventListener('click', () => {
+        isCalibrating = false;
+        currentScanIndex = 0;
+        thumbnailContainer.innerHTML = '';
+        scanInstruction.classList.remove('calibrating');
+        updateScanUI();
+        openCamera();
+    });
+
+    calibrateBtn.addEventListener('click', () => {
+        isCalibrating = true;
+        currentScanIndex = 0;
+        thumbnailContainer.innerHTML = '';
+        scanInstruction.classList.add('calibrating');
+        updateScanUI();
+        openCamera();
     });
 
     const stopCamera = () => {
@@ -144,12 +165,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     cameraModal.addEventListener('hidden.bs.modal', stopCamera);
 
-    captureBtn.addEventListener('click', () => {
-        const faceName = scanSequence[currentScanIndex];
+    captureBtn.addEventListener('click', async () => {
         const overlay = document.querySelector('.scan-overlay-target');
         const vRect = cameraVideo.getBoundingClientRect();
         const oRect = overlay.getBoundingClientRect();
 
+        // Calculate source coordinates in the video stream
         const sX = (oRect.left - vRect.left) * (cameraVideo.videoWidth / vRect.width);
         const sY = (oRect.top - vRect.top) * (cameraVideo.videoHeight / vRect.height);
         const sW = oRect.width * (cameraVideo.videoWidth / vRect.width);
@@ -158,40 +179,98 @@ document.addEventListener("DOMContentLoaded", () => {
         captureCanvas.width = sW;
         captureCanvas.height = sH;
         ctx.drawImage(cameraVideo, sX, sY, sW, sH, 0, 0, sW, sH);
-        
-        const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.9);
-        capturedImages[faceName] = dataUrl;
-        
-        // Update Grid Preview
-        const preview = document.getElementById(`preview-${faceName}`);
-        const card = document.getElementById(`area-${faceName}`);
-        preview.src = dataUrl;
-        preview.classList.remove('d-none');
-        card.classList.add('has-image');
 
-        // Add Thumbnail to Modal
+        if (isCalibrating) {
+            const colorName = calSequence[currentScanIndex];
+            // Sample center 20% for calibration
+            const sampleSize = Math.floor(sW * 0.2);
+            const sampleX = Math.floor((sW - sampleSize) / 2);
+            const sampleY = Math.floor((sH - sampleSize) / 2);
+            
+            const imgData = ctx.getImageData(sampleX, sampleY, sampleSize, sampleSize);
+            const rgb = getAverageRGB(imgData.data);
+            calibrationData[colorName] = rgbToHsv(rgb.r, rgb.g, rgb.b);
+            
+            addThumbnail(captureCanvas.toDataURL('image/jpeg', 0.5));
+            
+            currentScanIndex++;
+            if (currentScanIndex < calSequence.length) {
+                updateScanUI();
+            } else {
+                bootstrap.Modal.getInstance(cameraModal).hide();
+                alert("Calibration complete!");
+            }
+        } else {
+            const faceName = scanSequence[currentScanIndex];
+            const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.9);
+            capturedImages[faceName] = dataUrl;
+            
+            // Update manual upload grid
+            const preview = document.getElementById(`preview-${faceName}`);
+            const card = document.getElementById(`area-${faceName}`);
+            preview.src = dataUrl;
+            preview.classList.remove('d-none');
+            card.classList.add('has-image');
+
+            addThumbnail(dataUrl);
+
+            currentScanIndex++;
+            if (currentScanIndex < scanSequence.length) {
+                updateScanUI();
+            } else {
+                bootstrap.Modal.getInstance(cameraModal).hide();
+                submitScannedImages();
+            }
+        }
+    });
+
+    function getAverageRGB(data) {
+        let r = 0, g = 0, b = 0;
+        for (let i = 0; i < data.length; i += 4) {
+            r += data[i];
+            g += data[i+1];
+            b += data[i+2];
+        }
+        const count = data.length / 4;
+        return { r: r/count, g: g/count, b: b/count };
+    }
+
+    function rgbToHsv(r, g, b) {
+        r /= 255, g /= 255, b /= 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h, s, v = max;
+        const d = max - min;
+        s = max === 0 ? 0 : d / max;
+        if (max === min) {
+            h = 0;
+        } else {
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
+            }
+            h /= 6;
+        }
+        // OpenCV scale: H is 0-180, S/V are 0-255
+        return [h * 180, s * 255, v * 255];
+    }
+
+    function addThumbnail(src) {
         const thumb = document.createElement('img');
-        thumb.src = dataUrl;
+        thumb.src = src;
         thumb.style.width = '40px';
         thumb.style.height = '40px';
         thumb.style.objectFit = 'cover';
         thumb.style.borderRadius = '8px';
         thumb.style.border = '1px solid var(--primary)';
         thumbnailContainer.appendChild(thumb);
-
-        currentScanIndex++;
-        if (currentScanIndex < scanSequence.length) {
-            updateScanUI();
-        } else {
-            bootstrap.Modal.getInstance(cameraModal).hide();
-            submitScannedImages();
-        }
-    });
+    }
 
     function updateScanUI() {
-        const face = scanSequence[currentScanIndex].toUpperCase();
-        btnFaceName.textContent = face;
-        scanInstruction.textContent = `Scan ${face} Face`;
+        const sequence = isCalibrating ? calSequence : scanSequence;
+        const name = sequence[currentScanIndex].toUpperCase();
+        btnFaceName.textContent = name;
+        scanInstruction.textContent = isCalibrating ? `Center ${name} piece` : `Scan ${name} Face`;
     }
 
     async function submitScannedImages() {
@@ -199,9 +278,9 @@ document.addEventListener("DOMContentLoaded", () => {
         form.style.opacity = '0.3';
         loading.classList.remove('d-none');
         
-        const payload = {};
-        for (const [key, val] of Object.entries(capturedImages)) {
-            payload[key] = val;
+        const payload = { ...capturedImages };
+        if (Object.keys(calibrationData).length > 0) {
+            payload.calibration = calibrationData;
         }
         
         try {
