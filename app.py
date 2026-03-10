@@ -1,15 +1,24 @@
+print("--- DEBUG: Starting Import Trace ---")
 import os
+print("--- DEBUG: os imported ---")
 import base64
 import numpy as np
+print("--- DEBUG: numpy imported ---")
 import cv2
+print("--- DEBUG: cv2 imported ---")
 from flask import Flask, render_template, request, jsonify
+print("--- DEBUG: flask imported ---")
 from werkzeug.utils import secure_filename
 from image_processing import process_face_image, build_cube_string
+print("--- DEBUG: image_processing imported ---")
 from solver import solve_cube
+print("--- DEBUG: solver imported ---")
 
 app = Flask(__name__)
+print("--- DEBUG: Flask app initialized ---")
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+print("--- DEBUG: Uploads folder checked ---")
 
 # Map UI names to solver order names
 FACE_MAPPING = {
