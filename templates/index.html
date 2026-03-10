@@ -97,12 +97,30 @@
                 
                 <div class="correction-container">
                     <div class="cube-net-layout">
-                        <div id="correct-UP" class="face-grid-interactive" style="grid-area: U"></div>
-                        <div id="correct-LEFT" class="face-grid-interactive" style="grid-area: L"></div>
-                        <div id="correct-FRONT" class="face-grid-interactive" style="grid-area: F"></div>
-                        <div id="correct-RIGHT" class="face-grid-interactive" style="grid-area: R"></div>
-                        <div id="correct-DOWN" class="face-grid-interactive" style="grid-area: D"></div>
-                        <div id="correct-BACK" class="face-grid-interactive" style="grid-area: B"></div>
+                        <div class="face-container" style="grid-area: U">
+                            <span class="face-tag">UP</span>
+                            <div id="correct-UP" class="face-grid-interactive"></div>
+                        </div>
+                        <div class="face-container" style="grid-area: L">
+                            <span class="face-tag">LEFT</span>
+                            <div id="correct-LEFT" class="face-grid-interactive"></div>
+                        </div>
+                        <div class="face-container" style="grid-area: F">
+                            <span class="face-tag">FRONT</span>
+                            <div id="correct-FRONT" class="face-grid-interactive"></div>
+                        </div>
+                        <div class="face-container" style="grid-area: R">
+                            <span class="face-tag">RIGHT</span>
+                            <div id="correct-RIGHT" class="face-grid-interactive"></div>
+                        </div>
+                        <div class="face-container" style="grid-area: D">
+                            <span class="face-tag">DOWN</span>
+                            <div id="correct-DOWN" class="face-grid-interactive"></div>
+                        </div>
+                        <div class="face-container" style="grid-area: B">
+                            <span class="face-tag">BACK</span>
+                            <div id="correct-BACK" class="face-grid-interactive"></div>
+                        </div>
                     </div>
 
                     <div class="validation-sidebar">
