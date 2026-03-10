@@ -80,6 +80,58 @@ def solve():
             else:
                 return jsonify({"success": False, "error": f"Invalid file type for {face_key}."}), 400
                 
+    return process_and_solve(faces_colors)
+
+@app.route('/analyze', methods=['POST'])
+def analyze():
+    faces_colors = {}
+    
+    if request.is_json:
+        data = request.get_json()
+        for face_key in FACE_MAPPING.keys():
+            if face_key not in data:
+                return jsonify({"success": False, "error": f"Missing {face_key} image."}), 400
+                
+            img_b64 = data[face_key]
+            if ',' in img_b64:
+                img_b64 = img_b64.split(',')[1]
+                
+            try:
+                img_bytes = base64.b64decode(img_b64)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"{face_key}_analyze_camera.jpg")
+                with open(filepath, "wb") as f:
+                    f.write(img_bytes)
+                    
+                colors = process_face_image(filepath)
+                faces_colors[face_key] = colors
+            except Exception as e:
+                return jsonify({"success": False, "error": f"Error processing {face_key} face: {str(e)}"}), 500
+                
+    else:
+        if not request.files:
+            return jsonify({"success": False, "error": "No images uploaded."}), 400
+            
+        for face_key in FACE_MAPPING.keys():
+            if face_key not in request.files:
+                return jsonify({"success": False, "error": f"Missing {face_key} image."}), 400
+            
+            file = request.files[face_key]
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], f"analyze_{face_key}_{filename}")
+                file.save(filepath)
+                
+                try:
+                    colors = process_face_image(filepath)
+                    faces_colors[face_key] = colors
+                except Exception as e:
+                    return jsonify({"success": False, "error": f"Error processing {face_key} face: {str(e)}"}), 500
+            else:
+                return jsonify({"success": False, "error": f"Invalid file for {face_key}."}), 400
+
+    return jsonify({"success": True, "faces_colors": faces_colors})
+
+def process_and_solve(faces_colors):
     try:
         cube_string = build_cube_string(faces_colors)
         result = solve_cube(cube_string)
@@ -87,6 +139,14 @@ def solve():
         return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route('/solve_final', methods=['POST'])
+def solve_final():
+    data = request.get_json()
+    if not data or 'faces_colors' not in data:
+        return jsonify({"success": False, "error": "No color data provided"}), 400
+    
+    return process_and_solve(data['faces_colors'])
 
 @app.route('/preview_colors', methods=['POST'])
 def preview_colors():
@@ -103,8 +163,9 @@ def preview_colors():
         nparr = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
+        expected_center = data.get('expected_center')
         from image_processing import process_frame
-        result = process_frame(img)
+        result = process_frame(img, expected_center=expected_center)
         return jsonify({"success": True, "preview_data": result})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

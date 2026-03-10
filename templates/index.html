@@ -89,6 +89,71 @@
             </div>
         </form>
 
+        <!-- Manual Color Correction Section -->
+        <section id="correctionSection" class="mt-5 d-none animate-fade-in">
+            <div class="glass-panel p-4 p-md-5">
+                <h2 class="outfit mb-4 text-center">Review and Correct Colors</h2>
+                <p class="text-muted text-center mb-5">Click any square to adjust its color. Ensure exactly 9 of each color.</p>
+                
+                <div class="correction-container">
+                    <div class="cube-net-layout">
+                        <div id="correct-UP" class="face-grid-interactive" style="grid-area: U"></div>
+                        <div id="correct-LEFT" class="face-grid-interactive" style="grid-area: L"></div>
+                        <div id="correct-FRONT" class="face-grid-interactive" style="grid-area: F"></div>
+                        <div id="correct-RIGHT" class="face-grid-interactive" style="grid-area: R"></div>
+                        <div id="correct-DOWN" class="face-grid-interactive" style="grid-area: D"></div>
+                        <div id="correct-BACK" class="face-grid-interactive" style="grid-area: B"></div>
+                    </div>
+
+                    <div class="validation-sidebar">
+                        <div class="validation-card p-3">
+                            <h5 class="outfit mb-3 small text-uppercase letter-spacing-1">Color Distribution</h5>
+                            <div id="colorCounters" class="d-flex flex-column gap-2">
+                                <!-- JS Injected -->
+                                <div class="counter-item" data-color="white">
+                                    <span class="swatch col-white"></span> White: <span class="count">0</span>
+                                </div>
+                                <div class="counter-item" data-color="yellow">
+                                    <span class="swatch col-yellow"></span> Yellow: <span class="count">0</span>
+                                </div>
+                                <div class="counter-item" data-color="red">
+                                    <span class="swatch col-red"></span> Red: <span class="count">0</span>
+                                </div>
+                                <div class="counter-item" data-color="orange">
+                                    <span class="swatch col-orange"></span> Orange: <span class="count">0</span>
+                                </div>
+                                <div class="counter-item" data-color="blue">
+                                    <span class="swatch col-blue"></span> Blue: <span class="count">0</span>
+                                </div>
+                                <div class="counter-item" data-color="green">
+                                    <span class="swatch col-green"></span> Green: <span class="count">0</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-4 d-grid gap-2">
+                            <button id="solveFinalBtn" class="btn-premium" disabled>
+                                <i class="fas fa-magic me-2"></i> Solve Cube
+                            </button>
+                            <button id="rescanBtn" class="btn btn-outline-light rounded-pill py-2">
+                                <i class="fas fa-camera me-2"></i> Rescan Face
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Color Selection Palette (Floating) -->
+        <div id="colorPalette" class="color-palette d-none">
+            <div class="palette-option col-white" data-color="white"></div>
+            <div class="palette-option col-yellow" data-color="yellow"></div>
+            <div class="palette-option col-red" data-color="red"></div>
+            <div class="palette-option col-orange" data-color="orange"></div>
+            <div class="palette-option col-blue" data-color="blue"></div>
+            <div class="palette-option col-green" data-color="green"></div>
+        </div>
+
         <!-- Dynamic Results Section -->
         <section id="resultsSection" class="mt-5 d-none">
             <div class="glass-panel p-4 p-md-5 border-success">

@@ -179,10 +179,14 @@ document.addEventListener("DOMContentLoaded", () => {
         const frameData = tempCanvas.toDataURL('image/jpeg', 0.5);
 
         try {
+            const currentFace = scanSequence[currentScanIndex];
             const response = await fetch('/preview_colors', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: frameData })
+                body: JSON.stringify({ 
+                    image: frameData,
+                    expected_center: currentFace.color.toLowerCase()
+                })
             });
             const data = await response.json();
             if (data.success) {
@@ -295,17 +299,16 @@ document.addEventListener("DOMContentLoaded", () => {
         loading.classList.remove('d-none');
         
         try {
-            const resp = await fetch('/solve', {
+            const resp = await fetch('/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(capturedImages)
             });
             const data = await resp.json();
             if (data.success) {
-                renderSolution(data.solution);
-                renderDetectedFaces(data.faces_colors);
-                results.classList.remove('d-none');
-                results.scrollIntoView({ behavior: 'smooth' });
+                renderCorrectionUI(data.faces_colors);
+                correctionSection.classList.remove('d-none');
+                correctionSection.scrollIntoView({ behavior: 'smooth' });
             } else {
                 showError(data.error);
             }
@@ -316,4 +319,146 @@ document.addEventListener("DOMContentLoaded", () => {
             form.style.opacity = '1';
         }
     }
+
+    // --- Correction UI Logic ---
+    const correctionSection = document.getElementById('correctionSection');
+    const colorPalette = document.getElementById('colorPalette');
+    const solveFinalBtn = document.getElementById('solveFinalBtn');
+    const rescanBtn = document.getElementById('rescanBtn');
+    
+    let currentFacesColors = {};
+    let activeSquare = null;
+
+    function renderCorrectionUI(faces) {
+        currentFacesColors = JSON.parse(JSON.stringify(faces)); // Deep copy
+        const map = { 'up': 'UP', 'left': 'LEFT', 'front': 'FRONT', 'right': 'RIGHT', 'down': 'DOWN', 'back': 'BACK' };
+        
+        Object.keys(map).forEach(faceKey => {
+            const gridId = `correct-${map[faceKey]}`;
+            const grid = document.getElementById(gridId);
+            if (!grid) return;
+            
+            grid.innerHTML = '';
+            const colors = currentFacesColors[faceKey] || Array(9).fill('white');
+            
+            colors.forEach((color, index) => {
+                const square = document.createElement('div');
+                square.className = `cube-square col-${color.toLowerCase()}`;
+                square.dataset.face = faceKey;
+                square.dataset.index = index;
+                
+                square.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showPalette(square, e);
+                });
+                
+                grid.appendChild(square);
+            });
+        });
+        
+        validateCube();
+    }
+
+    function showPalette(square, event) {
+        activeSquare = square;
+        colorPalette.classList.remove('d-none');
+        
+        // Position palette near the square
+        const rect = square.getBoundingClientRect();
+        colorPalette.style.top = `${rect.top + window.scrollY - 80}px`;
+        colorPalette.style.left = `${rect.left + window.scrollX - 40}px`;
+    }
+
+    // Hide palette when clicking elsewhere
+    document.addEventListener('click', () => {
+        colorPalette.classList.add('d-none');
+    });
+
+    colorPalette.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const option = e.target.closest('.palette-option');
+        if (!option || !activeSquare) return;
+        
+        const newColor = option.dataset.color;
+        const face = activeSquare.dataset.face;
+        const index = parseInt(activeSquare.dataset.index);
+        
+        // Update state
+        currentFacesColors[face][index] = newColor;
+        
+        // Update UI
+        activeSquare.className = `cube-square col-${newColor}`;
+        
+        colorPalette.classList.add('d-none');
+        validateCube();
+    });
+
+    function validateCube() {
+        const allColors = [];
+        Object.values(currentFacesColors).forEach(faceColors => {
+            allColors.push(...faceColors);
+        });
+        
+        const counts = {};
+        ['white', 'yellow', 'red', 'orange', 'blue', 'green'].forEach(c => counts[c] = 0);
+        
+        allColors.forEach(color => {
+            if (counts[color] !== undefined) counts[color]++;
+        });
+        
+        let isValid = true;
+        Object.keys(counts).forEach(color => {
+            const count = counts[color];
+            const item = document.querySelector(`.counter-item[data-color="${color}"]`);
+            const countSpan = item.querySelector('.count');
+            
+            countSpan.textContent = count;
+            if (count !== 9) {
+                item.classList.add('invalid');
+                isValid = false;
+            } else {
+                item.classList.remove('invalid');
+            }
+        });
+        
+        solveFinalBtn.disabled = !isValid;
+    }
+
+    solveFinalBtn.addEventListener('click', async () => {
+        results.classList.add('d-none');
+        correctionSection.style.opacity = '0.3';
+        loading.classList.remove('d-none');
+        
+        try {
+            const resp = await fetch('/solve_final', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ faces_colors: currentFacesColors })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                renderSolution(data.solution);
+                renderDetectedFaces(data.faces_colors);
+                results.classList.remove('d-none');
+                results.scrollIntoView({ behavior: 'smooth' });
+                correctionSection.classList.add('d-none'); // Hide correction after success
+            } else {
+                showError(data.error);
+            }
+        } catch (err) {
+            showError("Solving error.");
+        } finally {
+            loading.classList.add('d-none');
+            correctionSection.style.opacity = '1';
+        }
+    });
+
+    rescanBtn.addEventListener('click', () => {
+        correctionSection.classList.add('d-none');
+        bootstrap.Modal.getOrCreateInstance(cameraModal).show();
+        currentScanIndex = 0;
+        thumbnailContainer.innerHTML = '';
+        updateScanUI();
+        openCamera();
+    });
 });
