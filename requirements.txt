@@ -6,3 +6,4 @@ pillow
 werkzeug
 scikit-learn
 gunicorn
+python-dotenv
