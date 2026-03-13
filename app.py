@@ -39,6 +39,10 @@ def allowed_file(filename):
 def index():
     return render_template('index.html')
 
+@app.route('/health')
+def health():
+    return jsonify({"status": "ok"}), 200
+
 @app.route('/solve', methods=['POST'])
 def solve():
     faces_colors = {}
