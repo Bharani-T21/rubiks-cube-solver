@@ -37,7 +37,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const formData = new FormData(form);
         
         try {
-            const response = await fetch('/solve', {
+            const response = await fetch('/analyze', {
                 method: 'POST',
                 body: formData
             });
@@ -45,13 +45,11 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await response.json();
             
             if (data.success) {
-                renderSolution(data.solution);
-                renderDetectedFaces(data.faces_colors);
-                
-                results.classList.remove('d-none');
-                results.scrollIntoView({ behavior: 'smooth' });
+                renderCorrectionUI(data.faces_colors);
+                correctionSection.classList.remove('d-none');
+                correctionSection.scrollIntoView({ behavior: 'smooth' });
             } else {
-                showError(data.error || "Recognition failed. Please ensure high quality photos.");
+                showError(data.error || "Analysis failed. Please ensure high quality photos.");
             }
             
         } catch (err) {
@@ -320,53 +318,311 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // --- Correction UI Logic ---
+    // --- Correction UI & 3D Rubik's Cube Controller ---
     const correctionSection = document.getElementById('correctionSection');
     const colorPalette = document.getElementById('colorPalette');
     const solveFinalBtn = document.getElementById('solveFinalBtn');
     const rescanBtn = document.getElementById('rescanBtn');
+    const resetCorrectionsBtn = document.getElementById('resetCorrectionsBtn');
+    const resetCubeBtn = document.getElementById('resetCubeBtn');
     
     let currentFacesColors = {};
-    let activeSquare = null;
+    let originalScannedColors = null;
+    let active3DSticker = null;
+
+    let scene = null;
+    let camera = null;
+    let renderer = null;
+    let controls = null;
+    let cubeGroup = null;
+    let stickerMeshes = [];
+    let is3DInitialized = false;
+
+    const colorMap = {
+        'white': 0xf2f2f7,
+        'yellow': 0xffcc00,
+        'red': 0xff3b30,
+        'orange': 0xff9500,
+        'blue': 0x007aff,
+        'green': 0x34c759
+    };
+
+    function getColorHex(name) {
+        const lower = name ? name.toLowerCase() : 'white';
+        return colorMap[lower] || 0xffffff;
+    }
+
+    function init3DScene() {
+        const container = document.getElementById('cube3DViewport');
+        if (!container) return;
+
+        // Clear loading or other children
+        container.querySelectorAll('canvas').forEach(c => c.remove());
+
+        // Create Scene
+        scene = new THREE.Scene();
+
+        // Create Camera
+        camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+        camera.position.set(3.8, 3.8, 5.5);
+
+        // Create Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        container.appendChild(renderer.domElement);
+
+        // OrbitControls
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enablePan = false;
+        controls.minDistance = 3.5;
+        controls.maxDistance = 10;
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.85);
+        dirLight1.position.set(6, 10, 6);
+        scene.add(dirLight1);
+
+        const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
+        dirLight2.position.set(-6, -10, -6);
+        scene.add(dirLight2);
+
+        // Create Cube Group
+        cubeGroup = new THREE.Group();
+        scene.add(cubeGroup);
+
+        // Generate the 27 cubies
+        const cubiesMap = {};
+        for (let x = -1; x <= 1; x++) {
+            for (let y = -1; y <= 1; y++) {
+                for (let z = -1; z <= 1; z++) {
+                    const geom = new THREE.BoxGeometry(0.92, 0.92, 0.92);
+                    const mat = new THREE.MeshStandardMaterial({
+                        color: 0x151518,
+                        roughness: 0.7,
+                        metalness: 0.15
+                    });
+                    const cubie = new THREE.Mesh(geom, mat);
+                    cubie.position.set(x, y, z);
+                    cubeGroup.add(cubie);
+                    cubiesMap[`${x},${y},${z}`] = cubie;
+                }
+            }
+        }
+
+        // Generate the 54 stickers
+        const facesList = ['up', 'left', 'front', 'right', 'down', 'back'];
+        stickerMeshes = [];
+
+        facesList.forEach(face => {
+            for (let i = 0; i < 9; i++) {
+                const mapping = getStickerMapping(face, i);
+                const key = `${mapping.x},${mapping.y},${mapping.z}`;
+                const cubie = cubiesMap[key];
+                if (cubie) {
+                    const stickerGeom = new THREE.BoxGeometry(0.78, 0.78, 0.025);
+                    const stickerMat = new THREE.MeshPhysicalMaterial({
+                        color: 0xffffff,
+                        roughness: 0.1,
+                        clearcoat: 1.0,
+                        clearcoatRoughness: 0.1
+                    });
+                    const sticker = new THREE.Mesh(stickerGeom, stickerMat);
+                    sticker.position.copy(mapping.localPos);
+                    sticker.rotation.copy(mapping.localRot);
+                    
+                    sticker.userData = { face: face, index: i };
+                    cubie.add(sticker);
+                    stickerMeshes.push(sticker);
+                }
+            }
+        });
+
+        // Click Handler (Separate drag from click)
+        let pointerDownX = 0;
+        let pointerDownY = 0;
+
+        renderer.domElement.addEventListener('pointerdown', (e) => {
+            pointerDownX = e.clientX;
+            pointerDownY = e.clientY;
+        });
+
+        renderer.domElement.addEventListener('click', (e) => {
+            const diffX = Math.abs(e.clientX - pointerDownX);
+            const diffY = Math.abs(e.clientY - pointerDownY);
+            if (diffX < 5 && diffY < 5) {
+                const intersected = getIntersectedSticker(e);
+                if (intersected) {
+                    e.stopPropagation();
+                    showPaletteForSticker(intersected, e);
+                }
+            }
+        });
+
+        // Hover Effect Handler
+        let hoveredSticker = null;
+        renderer.domElement.addEventListener('pointermove', (e) => {
+            const intersected = getIntersectedSticker(e);
+            if (intersected !== hoveredSticker) {
+                if (hoveredSticker) {
+                    hoveredSticker.material.emissive.setHex(0x000000);
+                }
+                hoveredSticker = intersected;
+                if (hoveredSticker) {
+                    hoveredSticker.material.emissive.setHex(0x333333);
+                    renderer.domElement.style.cursor = 'pointer';
+                } else {
+                    renderer.domElement.style.cursor = 'grab';
+                }
+            }
+        });
+
+        // Window resize
+        window.addEventListener('resize', onWindowResize);
+
+        // Start Animation loop
+        animate();
+
+        is3DInitialized = true;
+    }
+
+    function onWindowResize() {
+        if (!renderer || !camera) return;
+        const container = document.getElementById('cube3DViewport');
+        if (!container) return;
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if (controls) controls.update();
+        if (renderer && scene && camera) {
+            renderer.render(scene, camera);
+        }
+    }
+
+    function getIntersectedSticker(event) {
+        if (!renderer) return null;
+        const rect = renderer.domElement.getBoundingClientRect();
+        const mouseX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        const mouseY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), camera);
+        const intersects = raycaster.intersectObjects(stickerMeshes);
+        if (intersects.length > 0) {
+            return intersects[0].object;
+        }
+        return null;
+    }
+
+    function getStickerMapping(face, index) {
+        const r = Math.floor(index / 3);
+        const c = index % 3;
+        let x = 0, y = 0, z = 0;
+        let localPos = new THREE.Vector3();
+        let localRot = new THREE.Euler();
+
+        switch (face) {
+            case 'up':
+                x = c - 1;
+                y = 1;
+                z = r - 1;
+                localPos.set(0, 0.46, 0);
+                localRot.set(-Math.PI / 2, 0, 0);
+                break;
+            case 'down':
+                x = c - 1;
+                y = -1;
+                z = 1 - r;
+                localPos.set(0, -0.46, 0);
+                localRot.set(Math.PI / 2, 0, 0);
+                break;
+            case 'left':
+                x = -1;
+                y = 1 - r;
+                z = c - 1;
+                localPos.set(-0.46, 0, 0);
+                localRot.set(0, -Math.PI / 2, 0);
+                break;
+            case 'right':
+                x = 1;
+                y = 1 - r;
+                z = 1 - c;
+                localPos.set(0.46, 0, 0);
+                localRot.set(0, Math.PI / 2, 0);
+                break;
+            case 'front':
+                x = c - 1;
+                y = 1 - r;
+                z = 1;
+                localPos.set(0, 0, 0.46);
+                localRot.set(0, 0, 0);
+                break;
+            case 'back':
+                x = 1 - c;
+                y = 1 - r;
+                z = -1;
+                localPos.set(0, 0, -0.46);
+                localRot.set(0, Math.PI, 0);
+                break;
+        }
+        return { x, y, z, localPos, localRot };
+    }
+
+    function update3DStickerColors() {
+        if (!stickerMeshes || stickerMeshes.length === 0) return;
+        stickerMeshes.forEach(sticker => {
+            const face = sticker.userData.face;
+            const index = sticker.userData.index;
+            const colorName = currentFacesColors[face][index];
+            sticker.material.color.setHex(getColorHex(colorName));
+        });
+    }
 
     function renderCorrectionUI(faces) {
         currentFacesColors = JSON.parse(JSON.stringify(faces)); // Deep copy
-        const map = { 'up': 'UP', 'left': 'LEFT', 'front': 'FRONT', 'right': 'RIGHT', 'down': 'DOWN', 'back': 'BACK' };
+        originalScannedColors = JSON.parse(JSON.stringify(faces)); // Copy for reset
+
+        correctionSection.classList.remove('d-none');
         
-        Object.keys(map).forEach(faceKey => {
-            const gridId = `correct-${map[faceKey]}`;
-            const grid = document.getElementById(gridId);
-            if (!grid) return;
-            
-            grid.innerHTML = '';
-            const colors = currentFacesColors[faceKey] || Array(9).fill('white');
-            
-            colors.forEach((color, index) => {
-                const square = document.createElement('div');
-                square.className = `cube-square col-${color.toLowerCase()}`;
-                square.dataset.face = faceKey;
-                square.dataset.index = index;
-                
-                square.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    showPalette(square, e);
-                });
-                
-                grid.appendChild(square);
-            });
-        });
+        // Hide solution results from previous runs
+        results.classList.add('d-none');
         
+        if (!is3DInitialized) {
+            // Give layout a brief moment to compute widths so camera aspect ratio matches
+            setTimeout(() => {
+                init3DScene();
+                update3DStickerColors();
+                const loader = document.getElementById('cube3DLoading');
+                if (loader) {
+                    loader.style.opacity = 0;
+                    setTimeout(() => loader.classList.add('d-none'), 500);
+                }
+            }, 100);
+        } else {
+            update3DStickerColors();
+            const loader = document.getElementById('cube3DLoading');
+            if (loader) loader.classList.add('d-none');
+        }
+
         validateCube();
     }
 
-    function showPalette(square, event) {
-        activeSquare = square;
+    function showPaletteForSticker(sticker, event) {
+        active3DSticker = sticker;
         colorPalette.classList.remove('d-none');
         
-        // Position palette near the square
-        const rect = square.getBoundingClientRect();
-        colorPalette.style.top = `${rect.top + window.scrollY - 80}px`;
-        colorPalette.style.left = `${rect.left + window.scrollX - 40}px`;
+        // Position palette near mouse click
+        colorPalette.style.top = `${event.clientY + window.scrollY - 80}px`;
+        colorPalette.style.left = `${event.clientX + window.scrollX - 40}px`;
     }
 
     // Hide palette when clicking elsewhere
@@ -377,17 +633,17 @@ document.addEventListener("DOMContentLoaded", () => {
     colorPalette.addEventListener('click', (e) => {
         e.stopPropagation();
         const option = e.target.closest('.palette-option');
-        if (!option || !activeSquare) return;
+        if (!option || !active3DSticker) return;
         
         const newColor = option.dataset.color;
-        const face = activeSquare.dataset.face;
-        const index = parseInt(activeSquare.dataset.index);
+        const face = active3DSticker.userData.face;
+        const index = active3DSticker.userData.index;
         
         // Update state
         currentFacesColors[face][index] = newColor;
         
-        // Update UI
-        activeSquare.className = `cube-square col-${newColor}`;
+        // Update material
+        active3DSticker.material.color.setHex(getColorHex(newColor));
         
         colorPalette.classList.add('d-none');
         validateCube();
@@ -461,4 +717,29 @@ document.addEventListener("DOMContentLoaded", () => {
         updateScanUI();
         openCamera();
     });
+
+    if (resetCorrectionsBtn) {
+        resetCorrectionsBtn.addEventListener('click', () => {
+            if (originalScannedColors) {
+                currentFacesColors = JSON.parse(JSON.stringify(originalScannedColors));
+                update3DStickerColors();
+                validateCube();
+            }
+        });
+    }
+
+    if (resetCubeBtn) {
+        resetCubeBtn.addEventListener('click', () => {
+            const facesList = ['up', 'left', 'front', 'right', 'down', 'back'];
+            facesList.forEach(face => {
+                // Keep the center color (index 4) and set all stickers on the face to it
+                const centerColor = currentFacesColors[face][4] || 'white';
+                for (let i = 0; i < 9; i++) {
+                    currentFacesColors[face][i] = centerColor;
+                }
+            });
+            update3DStickerColors();
+            validateCube();
+        });
+    }
 });

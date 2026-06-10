@@ -2,39 +2,30 @@ import cv2
 import numpy as np
 
 # Robust HSV color centers (OpenCV: H:0-180, S:0-255, V:0-255)
-# These are hand-tuned for standard cube colors in average lighting.
-# Red has two peaks (0 and 180). We'll handle it via circular distance.
 DEFAULT_COLOR_CENTERS = {
-    'red': [0, 200, 150],
-    'orange': [10, 210, 200],
-    'yellow': [25, 180, 200],
-    'green': [65, 180, 150],
-    'blue': [115, 200, 150],
-    'white': [0, 30, 210]
+    'red': [175, 200, 150],
+    'orange': [12, 220, 200],
+    'yellow': [30, 200, 200],
+    'green': [70, 200, 150],
+    'blue': [110, 200, 150],
+    'white': [0, 0, 210]
 }
 
 def preprocess_image(img):
     """
-    Apply Gaussian blur, brightness normalization (CLAHE), and white balance.
+    Apply Gaussian blur and smartly boost saturation to make colors pop for HSV thresholding.
+    Note: Gray World white balance was removed because it fails drastically when 
+    the camera is pointed at a solid color (e.g., staring at a red Rubik's cube face).
     """
     blurred = cv2.GaussianBlur(img, (5, 5), 0)
     
-    # White Balance (Gray World)
-    result = blurred.astype(np.float32)
-    avg_b, avg_g, avg_r = np.mean(result[:, :, 0]), np.mean(result[:, :, 1]), np.mean(result[:, :, 2])
-    avg_gray = (avg_b + avg_g + avg_r) / 3
-    result[:, :, 0] *= (avg_gray / (avg_b + 1e-6))
-    result[:, :, 1] *= (avg_gray / (avg_g + 1e-6))
-    result[:, :, 2] *= (avg_gray / (avg_r + 1e-6))
-    result = np.clip(result, 0, 255).astype(np.uint8)
-
-    # CLAHE
-    lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    cl = clahe.apply(l)
-    limg = cv2.merge((cl, a, b))
-    final = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+    # Convert to HSV to boost saturation slightly without altering Hue
+    hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV).astype(np.float32)
+    
+    # Boost saturation by 20% to help differentiate washed out colors
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * 1.2, 0, 255)
+    
+    final = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
     
     return final
 
@@ -44,28 +35,36 @@ def get_color_and_confidence(hsv_pixel):
     the color name and a confidence score (0-1).
     """
     h, s, v = hsv_pixel
+    
+    # Hard override for white - if it has low saturation or is very bright and somewhat desaturated
+    if s < 75 and v > 80:
+        return 'white', 1.0
+        
     min_dist = float('inf')
     best_color = 'white'
     
     for color, center in DEFAULT_COLOR_CENTERS.items():
+        if color == 'white': continue # Handled by the explicit check above
+        
         ch, cs, cv = center
         dh = min(abs(h - ch), 180 - abs(h - ch))
         ds = s - cs
         dv = v - cv
         
-        if color == 'white':
-            dist = np.sqrt((dh * 0.2)**2 + (ds * 2.0)**2 + (dv * 1.0)**2)
-        elif color == 'red' or color == 'orange':
-            dist = np.sqrt((dh * 2.5)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
+        # Heavy weight on Hue since it represents the actual color tint
+        if color == 'orange' or color == 'red':
+             # Red and orange are very close in Hue, differentiate carefully
+             weigh_h = 4.0
         else:
-            dist = np.sqrt((dh * 2.0)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
+             weigh_h = 3.0
+             
+        dist = np.sqrt((dh * weigh_h)**2 + (ds * 1.0)**2 + (dv * 0.5)**2)
         
         if dist < min_dist:
             min_dist = dist
             best_color = color
             
-    # Significantly more relaxed confidence for "Self-Correcting" logic
-    # 150 allows for much more variation while still providing a scale.
+    # Confidence score calculation
     confidence = max(0, min(1, 1 - (min_dist / 150)))
     
     return best_color, confidence
@@ -97,32 +96,15 @@ def process_frame(img, expected_center=None):
                 avg = cv2.mean(roi)[:3]
             raw_hsv_list.append(list(avg))
 
-    # 2. Calculate Shift if expected_center is provided
-    shift = [0, 0, 0]
-    if expected_center and expected_center.lower() in DEFAULT_COLOR_CENTERS:
-        center_hsv = raw_hsv_list[4] # Middle sticker
-        target_hsv = DEFAULT_COLOR_CENTERS[expected_center.lower()]
-        
-        # Calculate circular hue shift
-        h_diff = target_hsv[0] - center_hsv[0]
-        if h_diff > 90: h_diff -= 180
-        if h_diff < -90: h_diff += 180
-        
-        shift = [
-            h_diff,
-            target_hsv[1] - center_hsv[1],
-            target_hsv[2] - center_hsv[2]
-        ]
-
-    # 3. Apply shift and classify
+    # 2. Shift Calculation (Disabled)
+    # Shifting colors based on a single center sticker is highly volatile 
+    # and usually causes incorrect detections across the whole face if the camera
+    # hits a glare. We rely on the improved static thresholding instead.
+    
+    # 3. Classify colors directly based on raw averages
     preview_data = []
     for raw_val in raw_hsv_list:
-        # Apply normalization shift
-        norm_h = (raw_val[0] + shift[0]) % 180
-        norm_s = np.clip(raw_val[1] + shift[1], 0, 255)
-        norm_v = np.clip(raw_val[2] + shift[2], 0, 255)
-        
-        color, conf = get_color_and_confidence([norm_h, norm_s, norm_v])
+        color, conf = get_color_and_confidence(raw_val)
         preview_data.append({"color": color, "confidence": conf})
             
     return preview_data
