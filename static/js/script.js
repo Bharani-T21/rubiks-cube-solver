@@ -68,8 +68,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function renderSolution(moves) {
         const container = document.getElementById('solutionMoves');
+        const badge = document.getElementById('moveCountBadge');
         container.innerHTML = '';
         
+        if (badge) {
+            badge.classList.remove('d-none');
+            badge.textContent = `${moves.length} moves`;
+            badge.className = moves.length <= 25 ? 'badge bg-success fs-6 fw-normal' : 'badge bg-primary fs-6 fw-normal';
+        }
+
         if (moves.length === 0) {
             container.innerHTML = '<div class="text-success fw-bold outfit">Already Solved!</div>';
             return;

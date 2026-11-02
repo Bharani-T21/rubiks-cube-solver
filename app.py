@@ -146,8 +146,7 @@ def analyze():
 
 def process_and_solve(faces_colors):
     try:
-        cube_string = build_cube_string(faces_colors)
-        result = solve_cube(cube_string)
+        result = solve_cube(faces_colors)
         result['faces_colors'] = faces_colors
         return jsonify(result)
     except Exception as e:
